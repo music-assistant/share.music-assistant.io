@@ -4,6 +4,8 @@ Landing page for Music Assistant share links. It shows the shared track, album o
 
 Originally written by [@dmoo500](https://github.com/dmoo500) as [music-assistant-share](https://github.com/dmoo500/music-assistant-share).
 
+![Share page with example music links, instance address guidance and the Open Home Foundation footer](docs/images/share-page.png)
+
 ## Link format
 
 - A link is `https://share.music-assistant.io/#<payload>`, so the payload is never sent to this site.
@@ -16,7 +18,8 @@ Originally written by [@dmoo500](https://github.com/dmoo500) as [music-assistant
 npm ci && npm run dev
 ```
 
-`npm test` runs the decoder tests and `npm run lint` checks ESLint and Prettier.
+`npm test` runs the decoder and share-page component tests, and `npm run lint`
+checks ESLint and Prettier.
 
 ## Deployment
 

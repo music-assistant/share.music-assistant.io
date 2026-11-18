@@ -4,6 +4,13 @@ export const SHARE_FORMAT_VERSION = "1";
 export const MAX_ENCODED_PAYLOAD_SIZE = 65536;
 export const MAX_DECODED_PAYLOAD_SIZE = 65536;
 
+export class ShareLinkCompatibilityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ShareLinkCompatibilityError";
+  }
+}
+
 /** Artwork hosts a share link may point at, matched exactly or as a subdomain. */
 export const ARTWORK_HOST_SUFFIXES = [
   "mzstatic.com",
@@ -52,7 +59,9 @@ const STRING_FIELDS = [
  */
 export async function decodeSharePayload(encoded: string): Promise<SharePayload> {
   if (!encoded.startsWith(SHARE_FORMAT_VERSION)) {
-    throw new Error("Unsupported share format version");
+    throw new ShareLinkCompatibilityError(
+      "Unsupported share format version. Please create a new share link."
+    );
   }
   if (encoded.length > MAX_ENCODED_PAYLOAD_SIZE) {
     throw new Error("Share payload is too large");
@@ -81,6 +90,11 @@ export function createMusicAssistantUrl(instanceUrl: string, encodedPayload: str
 }
 
 function parsePayload(data: unknown): SharePayload {
+  if (isRecord(data) && data.type === "playlist") {
+    throw new ShareLinkCompatibilityError(
+      "Unsupported share payload: playlist share links are no longer supported."
+    );
+  }
   if (!isRecord(data) || !MEDIA_TYPES.includes(data.type as MediaType)) {
     throw new Error("Unsupported share payload");
   }
@@ -155,10 +169,19 @@ function isValidArtworkUrl(value: string): boolean {
 
 /** Raw-inflate the bytes as UTF-8 text, aborting once the output exceeds the size cap. */
 async function inflate(compressed: Uint8Array<ArrayBuffer>): Promise<string> {
-  const reader = new Blob([compressed])
-    .stream()
-    .pipeThrough(new DecompressionStream("deflate-raw"))
-    .getReader();
+  let decompressor: DecompressionStream;
+  try {
+    if (typeof DecompressionStream === "undefined") {
+      throw new TypeError("DecompressionStream is unavailable");
+    }
+    decompressor = new DecompressionStream("deflate-raw");
+  } catch (cause) {
+    if (!(cause instanceof TypeError)) throw cause;
+    throw new ShareLinkCompatibilityError(
+      "This browser does not support raw DEFLATE share links. Please use an up-to-date browser."
+    );
+  }
+  const reader = new Blob([compressed]).stream().pipeThrough(decompressor).getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let size = 0;
   let text = "";
