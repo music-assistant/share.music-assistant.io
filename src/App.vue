@@ -6,12 +6,19 @@ import type { SharePayload } from "@/types";
 import { DEFAULT_INSTANCE_URL, STORAGE_KEY } from "@/constants";
 import MediaPreview from "@/components/MediaPreview.vue";
 import ProviderLinks from "@/components/ProviderLinks.vue";
-import { createMusicAssistantUrl, decodeSharePayload, parseInstanceUrl } from "@/helpers/share";
+import {
+  createMusicAssistantUrl,
+  decodeSharePayload,
+  parseInstanceUrl,
+  ShareLinkCompatibilityError,
+} from "@/helpers/share";
 
 const payload = ref<SharePayload | null>(null);
 const maUrl = useStorage(STORAGE_KEY, "");
 const decodeError = ref("");
 const error = ref("");
+let decodeGeneration = 0;
+let acceptedFragment = "";
 
 const pageTitle = computed(() => {
   if (!payload.value?.title) return "Music Assistant – Open in your instance";
@@ -27,17 +34,27 @@ watch(
 );
 
 async function decodePayload(): Promise<void> {
+  const generation = ++decodeGeneration;
   payload.value = null;
   decodeError.value = "";
+  error.value = "";
+  acceptedFragment = "";
   const raw = location.hash.slice(1);
   if (!raw) {
     decodeError.value = "No share data found in URL.";
     return;
   }
   try {
-    payload.value = await decodeSharePayload(raw);
-  } catch {
-    decodeError.value = "Could not decode share link. It may be corrupted.";
+    const candidate = await decodeSharePayload(raw);
+    if (generation !== decodeGeneration) return;
+    payload.value = candidate;
+    acceptedFragment = raw;
+  } catch (cause) {
+    if (generation !== decodeGeneration) return;
+    decodeError.value =
+      cause instanceof ShareLinkCompatibilityError
+        ? cause.message
+        : "Could not decode share link. It may be corrupted.";
   }
 }
 
@@ -51,12 +68,12 @@ function saveUrl(): void {
 }
 
 function openInMusicAssistant(): void {
-  if (!payload.value) {
+  const raw = location.hash.slice(1);
+  if (!payload.value || raw !== acceptedFragment) {
     error.value = "No share data found.";
     return;
   }
   try {
-    const raw = location.hash.slice(1);
     const url = createMusicAssistantUrl(maUrl.value, raw);
     window.open(url, "_blank", "noopener,noreferrer");
     error.value = "";
@@ -75,6 +92,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  ++decodeGeneration;
   window.removeEventListener("hashchange", decodePayload);
 });
 </script>
@@ -85,11 +103,18 @@ onBeforeUnmount(() => {
 
     <ProviderLinks v-if="payload?.provider_urls" :links="payload.provider_urls" />
 
-    <!-- MA Instance URL Input -->
+    <p class="hint mb-3">
+      <label for="instance-url">
+        Enter the URL of your Music Assistant instance to open this shared item.
+      </label>
+    </p>
+
     <div class="url-row">
       <input
+        id="instance-url"
         v-model.trim="maUrl"
         type="url"
+        aria-describedby="instance-url-hint"
         placeholder="http://musicassistant.local:8095"
         class="url-input"
         @keyup.enter="openInMusicAssistant"
@@ -104,21 +129,46 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <!-- Open Button -->
-    <button @click="openInMusicAssistant" class="btn-open">Open in Music Assistant</button>
+    <p id="instance-url-hint" class="hint mb-4">This URL is only stored in your browser.</p>
 
-    <!-- Hint -->
-    <p class="hint">
-      Enter the address of your Music Assistant instance above.<br />
-      It is saved in your browser for next time.
-    </p>
+    <button @click="openInMusicAssistant" class="btn-open" :disabled="!payload">
+      Open in Music Assistant
+    </button>
 
-    <div v-if="decodeError" class="error">
+    <div v-if="decodeError" class="error" role="alert">
       {{ decodeError }}
     </div>
-    <div v-if="error" class="error">
+    <div v-if="error" class="error" role="alert">
       {{ error }}
     </div>
+    <footer class="mt-6 text-center text-xs text-(--color-text-secondary)">
+      <a
+        href="https://www.openhomefoundation.org/"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="inline-flex items-center justify-center gap-2 hover:underline"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 240 356"
+          width="24"
+          height="24"
+          class="shrink-0"
+          aria-hidden="true"
+        >
+          <path
+            d="M130.992 4.78147C124.939 -1.30395 115.034 -1.30395 109.008 4.78147L11.0056 103.307C4.95251 109.393 0 121.405 0 129.994V219.352C0 227.94 6.9964 235 15.565 235H224.435C232.977 235 240 227.966 240 219.352V129.994C240 121.405 235.048 109.393 228.994 103.307L130.992 4.78147Z"
+            fill="currentColor"
+          />
+          <path
+            d="M228 275C234.627 275 240 280.373 240 287V344C240 350.627 234.627 356 228 356H213C206.373 356 201 350.627 201 344V314H39V344C39 350.627 33.6274 356 27 356H12C5.37258 356 0 350.627 0 344V287C0 280.373 5.37258 275 12 275H228Z"
+            fill="currentColor"
+            opacity="0.6"
+          />
+        </svg>
+        <span>Music Assistant is a product from the Open Home Foundation</span>
+      </a>
+    </footer>
   </div>
 </template>
 
@@ -173,6 +223,11 @@ button:hover {
   background: var(--color-accent);
   color: #000;
   margin-bottom: 0.75rem;
+}
+
+.btn-open:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .btn-save {
